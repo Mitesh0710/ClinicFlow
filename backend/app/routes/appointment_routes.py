@@ -16,7 +16,7 @@ def serialize(appt):
 def book_appointment(appt: AppointmentCreate, user: dict = Depends(require_role("receptionist"))):
     if not check_slot_available(appt.doctor_id, appt.date, appt.time, appt.duration_minutes):
         raise HTTPException(409, "This slot is already booked. Please choose another time.")
-    
+
     doctor = users_col.find_one({"_id": ObjectId(appt.doctor_id), "role": "doctor"})
     if not doctor:
         raise HTTPException(404, "Doctor not found")
@@ -28,6 +28,21 @@ def book_appointment(appt: AppointmentCreate, user: dict = Depends(require_role(
     doc["reminder_sent"] = False
 
     result = appointments_col.insert_one(doc)
+
+    # Send booking confirmation email immediately
+    if appt.patient_email:
+        from app.services.reminder_service import send_booking_confirmation
+        try:
+            send_booking_confirmation(
+                appt.patient_email,
+                appt.patient_name,
+                appt.date,
+                appt.time,
+                doctor.get("name", "your doctor")
+            )
+        except Exception as e:
+            print(f"[EMAIL] Confirmation failed: {e}")
+
     return {"message": "Appointment booked", "id": str(result.inserted_id)}
 
 @router.get("/slots/{doctor_id}/{date}")
@@ -42,13 +57,9 @@ def list_appointments(
     user: dict = Depends(get_current_user)
 ):
     query = {}
-    if doctor_id:
-        query["doctor_id"] = doctor_id
-    if date:
-        query["date"] = date
-    if status:
-        query["status"] = status
-
+    if doctor_id: query["doctor_id"] = doctor_id
+    if date: query["date"] = date
+    if status: query["status"] = status
     appts = list(appointments_col.find(query).sort("date", 1))
     return [serialize(a) for a in appts]
 
@@ -66,11 +77,9 @@ def reschedule(appt_id: str, data: AppointmentReschedule, _: dict = Depends(requ
         raise HTTPException(404, "Appointment not found")
     if appt["status"] == "cancelled":
         raise HTTPException(400, "Cannot reschedule a cancelled appointment")
-
     if not check_slot_available(appt["doctor_id"], data.new_date, data.new_time,
-                                 appt.get("duration_minutes", 30), exclude_id=appt_id):
+                                appt.get("duration_minutes", 30), exclude_id=appt_id):
         raise HTTPException(409, "New slot is already taken")
-
     appointments_col.update_one(
         {"_id": ObjectId(appt_id)},
         {"$set": {"date": data.new_date, "time": data.new_time, "reminder_sent": False}}

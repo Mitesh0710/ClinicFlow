@@ -29,7 +29,24 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
       const fetchSlots = async () => {
         const api = await getApi()
         api.get(`/appointments/slots/${form.doctor_id}/${form.date}?duration=${form.duration_minutes}`)
-          .then(r => setSlots(r.data))
+          .then(r => {
+            const today = new Date().toISOString().split("T")[0]
+            const isToday = form.date === today
+
+            const filtered = r.data.map(s => {
+              if (!isToday) return s
+              // Compare slot time with current time
+              const [slotHour, slotMin] = s.time.split(":").map(Number)
+              const now = new Date()
+              const slotDate = new Date()
+              slotDate.setHours(slotHour, slotMin, 0, 0)
+              // Mark past slots as unavailable
+              if (slotDate <= now) return { ...s, available: false }
+              return s
+            })
+
+            setSlots(filtered)
+          })
           .catch(() => setSlots([]))
       }
       fetchSlots()
@@ -111,7 +128,7 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
               <label className="block text-xs font-medium text-gray-600 mb-1">Date *</label>
               <input required type="date" className="input-field"
                 min={new Date().toISOString().split("T")[0]}
-                value={form.date} onChange={e => set("date", e.target.value)} />
+                value={form.date} onChange={e => { set("date", e.target.value); set("time", "") }} />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Duration</label>

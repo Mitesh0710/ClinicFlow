@@ -33,6 +33,6 @@ def get_available_slots(doctor_id: str, date: str, duration_minutes: int = 30) -
         time_str = current.strftime("%H:%M")
         available = check_slot_available(doctor_id, date, time_str, duration_minutes)
         slots.append({"time": time_str, "available": available})
-        current += timedelta(minutes=30)
+        current += timedelta(minutes=duration_minutes)  # ✅ fixed: was hardcoded 30
 
     return slots
