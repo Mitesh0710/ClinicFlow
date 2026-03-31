@@ -12,8 +12,12 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASS = os.getenv("SMTP_PASS", "")
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "")
 
 print(f"[EMAIL] SMTP configured for: {SMTP_USER}")
+print(f"[WHATSAPP] Twilio SID found: {bool(TWILIO_SID)}")
 
 def send_email(to_email: str, subject: str, html: str):
     if not SMTP_USER:
@@ -33,7 +37,26 @@ def send_email(to_email: str, subject: str, html: str):
     except Exception as e:
         print(f"[EMAIL] Failed to send to {to_email}: {e}")
 
-def send_booking_confirmation(to_email: str, patient_name: str, date: str, time: str, doctor_name: str):
+def send_whatsapp(to_phone: str, message: str):
+    if not TWILIO_SID:
+        print(f"[WHATSAPP] Twilio not configured")
+        return
+    if not to_phone:
+        print(f"[WHATSAPP] No phone number provided")
+        return
+    try:
+        from twilio.rest import Client
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        to = f"whatsapp:+{to_phone.lstrip('+')}" if not to_phone.startswith("whatsapp:") else to_phone
+        print(f"[WHATSAPP] Sending to {to}")
+        msg = client.messages.create(from_=TWILIO_FROM, to=to, body=message)
+        print(f"[WHATSAPP] Sent! SID: {msg.sid}")
+    except Exception as e:
+        print(f"[WHATSAPP] Failed: {e}")
+
+def send_booking_confirmation(to_email: str, patient_name: str, date: str, time: str, doctor_name: str, patient_phone: str = None):
+    print(f"[DEBUG] send_booking_confirmation — email={to_email}, phone={patient_phone}")
+
     subject = f"Appointment Confirmed — {date} at {time}"
     html = f"""
     <html><body style="font-family:sans-serif;background:#f9fafb;padding:32px">
@@ -53,7 +76,17 @@ def send_booking_confirmation(to_email: str, patient_name: str, date: str, time:
     """
     send_email(to_email, subject, html)
 
-def send_reminder_email(to_email: str, patient_name: str, date: str, time: str, doctor_name: str):
+    if patient_phone:
+        send_whatsapp(patient_phone, (
+            f"✅ *Appointment Confirmed*\n\n"
+            f"Hello {patient_name}, your appointment has been booked.\n\n"
+            f"📅 Date: {date}\n"
+            f"⏰ Time: {time}\n"
+            f"👨‍⚕️ Doctor: {doctor_name}\n\n"
+            f"Please arrive 10 minutes early."
+        ))
+
+def send_reminder_email(to_email: str, patient_name: str, date: str, time: str, doctor_name: str, patient_phone: str = None):
     subject = f"⏰ Appointment in 1 hour — {time} today"
     html = f"""
     <html><body style="font-family:sans-serif;background:#f9fafb;padding:32px">
@@ -72,6 +105,16 @@ def send_reminder_email(to_email: str, patient_name: str, date: str, time: str, 
     </body></html>
     """
     send_email(to_email, subject, html)
+
+    if patient_phone:
+        send_whatsapp(patient_phone, (
+            f"⏰ *Appointment Reminder*\n\n"
+            f"Hello {patient_name}, your appointment is in 1 hour!\n\n"
+            f"📅 Date: {date}\n"
+            f"⏰ Time: {time}\n"
+            f"👨‍⚕️ Doctor: {doctor_name}\n\n"
+            f"Please arrive 10 minutes early."
+        ))
 
 def send_pending_reminders():
     from app.database import users_col
@@ -107,7 +150,8 @@ def send_pending_reminders():
             appt["patient_name"],
             appt["date"],
             appt["time"],
-            doctor_name
+            doctor_name,
+            appt.get("patient_phone")
         )
         appointments_col.update_one({"_id": appt["_id"]}, {"$set": {"reminder_sent": True}})
         count += 1

@@ -11,7 +11,9 @@ db = client["clinicflow"]
 
 users_col = db["users"]
 appointments_col = db["appointments"]
+unavailable_col = db["unavailable_dates"]
 
 users_col.create_index([("email", ASCENDING)], unique=True)
 appointments_col.create_index([("doctor_id", ASCENDING), ("date", ASCENDING), ("time", ASCENDING)])
 appointments_col.create_index([("status", ASCENDING)])
+unavailable_col.create_index([("doctor_id", ASCENDING), ("date", ASCENDING)], unique=True)

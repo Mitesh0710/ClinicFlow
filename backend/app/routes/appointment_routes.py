@@ -29,7 +29,7 @@ def book_appointment(appt: AppointmentCreate, user: dict = Depends(require_role(
 
     result = appointments_col.insert_one(doc)
 
-    # Send booking confirmation email immediately
+    # Send booking confirmation email + WhatsApp immediately
     if appt.patient_email:
         from app.services.reminder_service import send_booking_confirmation
         try:
@@ -38,7 +38,8 @@ def book_appointment(appt: AppointmentCreate, user: dict = Depends(require_role(
                 appt.patient_name,
                 appt.date,
                 appt.time,
-                doctor.get("name", "your doctor")
+                doctor.get("name", "your doctor"),
+                appt.patient_phone  # ← phone for WhatsApp
             )
         except Exception as e:
             print(f"[EMAIL] Confirmation failed: {e}")

@@ -4,6 +4,7 @@ import { useApi } from "../services/useApi.js"
 export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null }) {
   const [doctors, setDoctors] = useState([])
   const [slots, setSlots] = useState([])
+  const [unavailableInfo, setUnavailableInfo] = useState(null)
   const [form, setForm] = useState({
     patient_name: "", patient_phone: "", patient_email: "",
     doctor_id: "", date: "", time: "", duration_minutes: 30, notes: ""
@@ -25,32 +26,37 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
   }, [])
 
   useEffect(() => {
-    if (form.doctor_id && form.date) {
-      const fetchSlots = async () => {
-        const api = await getApi()
-        api.get(`/appointments/slots/${form.doctor_id}/${form.date}?duration=${form.duration_minutes}`)
-          .then(r => {
-            const today = new Date().toISOString().split("T")[0]
-            const isToday = form.date === today
+    if (!form.doctor_id || !form.date) return
 
-            const filtered = r.data.map(s => {
-              if (!isToday) return s
-              // Compare slot time with current time
-              const [slotHour, slotMin] = s.time.split(":").map(Number)
-              const now = new Date()
-              const slotDate = new Date()
-              slotDate.setHours(slotHour, slotMin, 0, 0)
-              // Mark past slots as unavailable
-              if (slotDate <= now) return { ...s, available: false }
-              return s
-            })
+    const fetchSlotsAndAvailability = async () => {
+      const api = await getApi()
 
-            setSlots(filtered)
-          })
-          .catch(() => setSlots([]))
+      // Check unavailability first
+      const unavailRes = await api.get(`/doctor/unavailable/${form.doctor_id}`).catch(() => ({ data: [] }))
+      const blocked = unavailRes.data.find(u => u.date === form.date)
+      if (blocked) {
+        setUnavailableInfo(blocked)
+        setSlots([])
+        return
       }
-      fetchSlots()
+      setUnavailableInfo(null)
+
+      // Fetch slots
+      const r = await api.get(`/appointments/slots/${form.doctor_id}/${form.date}?duration=${form.duration_minutes}`).catch(() => ({ data: [] }))
+      const today = new Date().toISOString().split("T")[0]
+      const isToday = form.date === today
+      const filtered = r.data.map(s => {
+        if (!isToday) return s
+        const [slotHour, slotMin] = s.time.split(":").map(Number)
+        const slotDate = new Date()
+        slotDate.setHours(slotHour, slotMin, 0, 0)
+        if (slotDate <= new Date()) return { ...s, available: false }
+        return s
+      })
+      setSlots(filtered)
     }
+
+    fetchSlotsAndAvailability()
   }, [form.doctor_id, form.date, form.duration_minutes])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
@@ -115,7 +121,7 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Doctor *</label>
-                <select required className="input-field" value={form.doctor_id} onChange={e => set("doctor_id", e.target.value)}>
+                <select required className="input-field" value={form.doctor_id} onChange={e => { set("doctor_id", e.target.value); set("time", "") }}>
                   <option value="">Select doctor</option>
                   {doctors.map(d => <option key={d._id} value={d._id}>{d.name}</option>)}
                 </select>
@@ -142,7 +148,22 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
             </div>
           </div>
 
-          {slots.length > 0 && (
+          {/* Doctor unavailable warning */}
+          {unavailableInfo && form.doctor_id && form.date && (
+            <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-4 flex items-start gap-3">
+              <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636"/>
+              </svg>
+              <div>
+                <p className="text-sm font-semibold text-red-700">Doctor unavailable on this date</p>
+                {unavailableInfo.reason && <p className="text-xs text-red-500 mt-0.5">Reason: {unavailableInfo.reason}</p>}
+                <p className="text-xs text-red-400 mt-1">Please select a different date to proceed.</p>
+              </div>
+            </div>
+          )}
+
+          {/* Slots */}
+          {!unavailableInfo && slots.length > 0 && (
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-2">Available slots *</label>
               <div className="grid grid-cols-4 gap-2">
@@ -174,7 +195,7 @@ export default function BookingModal({ onClose, onSuccess, rescheduleAppt = null
 
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="flex-1 btn-secondary text-sm">Cancel</button>
-            <button type="submit" disabled={loading || !form.time}
+            <button type="submit" disabled={loading || !form.time || !!unavailableInfo}
               className="flex-1 btn-primary text-sm disabled:opacity-50">
               {loading ? "Saving..." : isReschedule ? "Reschedule" : "Book Appointment"}
             </button>
